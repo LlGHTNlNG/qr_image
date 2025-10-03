@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Visor de Imagen</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+        }
+
+        body, html {
+            width: 100%;
+            height: 100%;
+            background: #000000;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+        }
+
+        #imageContainer {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #000000;
+        }
+
+        #protectedImage {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+            pointer-events: none;
+            -webkit-user-drag: none;
+            -khtml-user-drag: none;
+            -moz-user-drag: none;
+            -o-user-drag: none;
+            user-drag: none;
+            -webkit-touch-callout: none;
+            -webkit-user-select: none;
+            -khtml-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+        }
+
+        /* Capa de protección invisible que se activa durante capturas */
+        #protectionOverlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: #000000;
+            z-index: 9999;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.1s ease;
+        }
+
+        /* Capa adicional para bloquear capturas */
+        #captureBlocker {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: #000000;
+            z-index: 10000;
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        /* Ocultar imagen durante impresión */
+        @media print {
+            #protectedImage {
+                display: none !important;
+            }
+            body {
+                background: #000000 !important;
+            }
+        }
+
+        /* Protección contra herramientas de desarrollador */
+        .dev-tools-detected {
+            position: fixed !important;
+            top: 0 !important;
+            left: 0 !important;
+            width: 100vw !important;
+            height: 100vh !important;
+            background: #000000 !important;
+            z-index: 99999 !important;
+        }
+    </style>
+</head>
+<body>
+    <div id="imageContainer">
+        <img id="protectedImage" alt="Imagen protegida" style="display: none;">
+    </div>
+    
+    <!-- Capas de protección -->
+    <div id="protectionOverlay"></div>
+    <div id="captureBlocker"></div>
+
+    <script>
+        // Variables globales
+        let isProtectionActive = false;
+        let captureDetectionActive = false;
+        let protectionOverlay = document.getElementById('protectionOverlay');
+        let captureBlocker = document.getElementById('captureBlocker');
+        let protectedImage = document.getElementById('protectedImage');
+
+        // Función para cargar imagen desde código
+        function loadImage(imageSrc) {
+            protectedImage.src = imageSrc;
+            protectedImage.style.display = 'block';
+            isProtectionActive = true;
+            initAllProtections();
+        }
+
+        // Variables para detección avanzada
+        let isBlackLayerActive = false;
+        let lastActivityTime = Date.now();
+        let suspiciousActivityCount = 0;
+        
+        // Función para activar capa negra (simula captura negra)
+        function activateBlackLayer(duration = 500) {
+            if (isBlackLayerActive) return;
+            
+            isBlackLayerActive = true;
+            protectionOverlay.style.opacity = '1';
+            captureBlocker.style.opacity = '1';
+            protectedImage.style.opacity = '0';
+            
+            // Mantener la capa negra por más tiempo
+            setTimeout(() => {
+                if (isBlackLayerActive) {
+                    protectionOverlay.style.opacity = '0';
+                    captureBlocker.style.opacity = '0';
+                    protectedImage.style.opacity = '1';
+                    isBlackLayerActive = false;
+                }
+            }, duration);
+        }
+
+        // Función para activar protección permanente
+        function activatePermanentProtection() {
+            protectionOverlay.style.opacity = '1';
+            captureBlocker.style.opacity = '1';
+            protectedImage.style.display = 'none';
+            document.body.style.background = '#000000';
+        }
+
+        // Detección avanzada de capturas de pantalla
+        function initScreenshotProtection() {
+            // Detección de teclas más agresiva
+            document.addEventListener('keydown', function(e) {
+                lastActivityTime = Date.now();
+                
+                // Print Screen y variantes
+                if (e.key === 'PrintScreen' || e.code === 'PrintScreen' ||
+                    (e.altKey && e.key === 'PrintScreen') ||
+                    (e.metaKey && e.shiftKey && (e.key === 'S' || e.key === 's')) ||
+                    (e.ctrlKey && e.shiftKey && (e.key === 'S' || e.key === 's'))) {
+                    
+                    e.preventDefault();
+                    e.stopPropagation();
+                    suspiciousActivityCount++;
+                    activateBlackLayer(2000); // 2 segundos de protección
+                    
+                    if (suspiciousActivityCount > 3) {
+                        activatePermanentProtection();
+                    }
+                    return false;
+                }
+
+                // Herramientas de desarrollador
+                if (e.key === 'F12' || 
+                    (e.ctrlKey && e.shiftKey && (e.key === 'I' || e.key === 'i')) ||
+                    (e.ctrlKey && (e.key === 'U' || e.key === 'u'))) {
+                    e.preventDefault();
+                    activateBlackLayer(1500);
+                    return false;
+                }
+
+                // Operaciones de copia/guardado
+                if (e.ctrlKey || e.metaKey) {
+                    if (['c', 'C', 'a', 'A', 's', 'S', 'p', 'P', 'x', 'X', 'v', 'V'].includes(e.key)) {
+                        e.preventDefault();
+                        activateBlackLayer(1000);
+                        return false;
+                    }
+                }
+            });
+
+            // Detección por keyup también (para capturas que no disparan keydown)
+            document.addEventListener('keyup', function(e) {
+                if (e.key === 'PrintScreen' || e.code === 'PrintScreen') {
+                    activateBlackLayer(2000);
+                }
+            });
+
+            // Detección por pérdida de foco inmediata
+            let focusLossCount = 0;
+            window.addEventListener('blur', function() {
+                focusLossCount++;
+                activateBlackLayer(1500);
+                
+                if (focusLossCount > 5) {
+                    activatePermanentProtection();
+                }
+            });
+        }
+
+        // Detección de herramientas de captura adicionales
+        function initAdvancedCaptureDetection() {
+            // Detección de herramientas de captura por nombre de proceso (limitado en navegador)
+            // Pero podemos detectar comportamientos sospechosos
+            
+            // Detección de movimiento del mouse sospechoso
+            let mouseMovements = 0;
+            let lastMouseTime = Date.now();
+            
+            document.addEventListener('mousemove', function(e) {
+                mouseMovements++;
+                const currentTime = Date.now();
+                
+                // Si hay muchos movimientos muy rápidos, puede ser automatización
+                if (currentTime - lastMouseTime < 10 && mouseMovements > 50) {
+                    activateBlackLayer(2000);
+                }
+                
+                lastMouseTime = currentTime;
+                lastActivityTime = currentTime;
+            });
+
+            // Detección de clics sospechosos
+            document.addEventListener('click', function(e) {
+                // Prevenir clics en la imagen
+                if (e.target === protectedImage) {
+                    e.preventDefault();
+                    activateBlackLayer(1000);
+                }
+            });
+
+            // Detección de intentos de arrastrar la imagen
+            document.addEventListener('dragstart', function(e) {
+                e.preventDefault();
+                activateBlackLayer(1500);
+                return false;
+            });
+
+            // Protección contra selección de texto/imagen
+            document.addEventListener('selectstart', function(e) {
+                e.preventDefault();
+                activateBlackLayer(500);
+                return false;
+            });
+        }
+
+        // Protección contra pérdida de foco y cambios de visibilidad
+        function initVisibilityProtection() {
+            // Monitoreo de visibilidad más agresivo
+            document.addEventListener('visibilitychange', function() {
+                if (document.hidden) {
+                    suspiciousActivityCount++;
+                    activateBlackLayer(3000); // 3 segundos de protección
+                    
+                    if (suspiciousActivityCount > 2) {
+                        activatePermanentProtection();
+                    }
+                }
+            });
+
+            // Detección de pérdida de foco con contador
+            let blurCount = 0;
+            window.addEventListener('blur', function() {
+                blurCount++;
+                activateBlackLayer(2000);
+                
+                if (blurCount > 3) {
+                    activatePermanentProtection();
+                }
+            });
+
+            // Monitoreo continuo de actividad sospechosa
+            setInterval(function() {
+                const currentTime = Date.now();
+                const timeSinceLastActivity = currentTime - lastActivityTime;
+                
+                // Si no hay actividad por mucho tiempo, puede ser sospechoso
+                if (timeSinceLastActivity > 30000) { // 30 segundos
+                    lastActivityTime = currentTime;
+                }
+            }, 5000);
+
+            // Detección de cambio de tamaño de ventana (posible captura)
+            window.addEventListener('resize', function() {
+                activateBlackLayer(1000);
+            });
+
+            // Reactivar protecciones al volver
+            window.addEventListener('focus', function() {
+                setTimeout(initAllProtections, 100);
+            });
+        }
+
+        // Protección contra herramientas de desarrollador
+        function initDevToolsProtection() {
+            let devToolsOpen = false;
+            
+            function detectDevTools() {
+                const threshold = 160;
+                const widthThreshold = window.outerWidth - window.innerWidth > threshold;
+                const heightThreshold = window.outerHeight - window.innerHeight > threshold;
+                
+                if (widthThreshold || heightThreshold) {
+                    if (!devToolsOpen) {
+                        devToolsOpen = true;
+                        document.body.className = 'dev-tools-detected';
+                        document.body.innerHTML = '<div style="width:100vw;height:100vh;background:#000000;"></div>';
+                    }
+                }
+            }
+
+            setInterval(detectDevTools, 100);
+
+            // Protección adicional contra debugger
+            setInterval(() => {
+                if (isProtectionActive) {
+                    try {
+                        debugger;
+                    } catch (e) {
+                        activateBlackLayer();
+                    }
+                }
+            }, 1000);
+        }
+
+        // Protección contra clic derecho y menú contextual
+        function initRightClickProtection() {
+            document.addEventListener('contextmenu', function(e) {
+                e.preventDefault();
+                activateBlackLayer();
+                return false;
+            });
+
+            // Protección táctil
+            document.addEventListener('touchstart', function(e) {
+                if (e.touches.length > 1) {
+                    e.preventDefault();
+                    activateBlackLayer();
+                }
+            });
+        }
+
+        // Protección contra arrastrar y seleccionar
+        function initDragProtection() {
+            document.addEventListener('dragstart', function(e) {
+                e.preventDefault();
+                activateBlackLayer();
+                return false;
+            });
+
+            document.addEventListener('selectstart', function(e) {
+                e.preventDefault();
+                return false;
+            });
+        }
+
+        // Detección de cambios en el DOM (posibles inyecciones)
+        function initDOMProtection() {
+            const observer = new MutationObserver(function(mutations) {
+                mutations.forEach(function(mutation) {
+                    if (mutation.type === 'childList') {
+                        mutation.addedNodes.forEach(function(node) {
+                            if (node.nodeType === 1 && 
+                                (node.tagName === 'SCRIPT' || node.tagName === 'IFRAME')) {
+                                node.remove();
+                                activateBlackLayer();
+                            }
+                        });
+                    }
+                });
+            });
+
+            observer.observe(document.body, {
+                childList: true,
+                subtree: true
+            });
+        }
+
+        // Protección contra capturas por cambio de tamaño de ventana
+        function initWindowProtection() {
+            let lastWidth = window.innerWidth;
+            let lastHeight = window.innerHeight;
+
+            window.addEventListener('resize', function() {
+                if (isProtectionActive) {
+                    const widthChange = Math.abs(window.innerWidth - lastWidth);
+                    const heightChange = Math.abs(window.innerHeight - lastHeight);
+                    
+                    // Si hay un cambio significativo, podría ser una captura
+                    if (widthChange > 50 || heightChange > 50) {
+                        activateBlackLayer();
+                    }
+                    
+                    lastWidth = window.innerWidth;
+                    lastHeight = window.innerHeight;
+                }
+            });
+        }
+
+        // Protección contra inspección de red
+        function initNetworkProtection() {
+            // Bloquear acceso a recursos de imagen
+            const originalFetch = window.fetch;
+            window.fetch = function(...args) {
+                activateBlackLayer();
+                return originalFetch.apply(this, args);
+            };
+
+            // Bloquear XMLHttpRequest
+            const originalXHR = window.XMLHttpRequest;
+            window.XMLHttpRequest = function() {
+                const xhr = new originalXHR();
+                const originalOpen = xhr.open;
+                xhr.open = function() {
+                    activateBlackLayer();
+                    return originalOpen.apply(this, arguments);
+                };
+                return xhr;
+            };
+        }
+
+        // Inicializar todas las protecciones
+        function initAllProtections() {
+            initScreenshotProtection();
+            initAdvancedCaptureDetection();
+            initVisibilityProtection();
+            initDevToolsProtection();
+            initRightClickProtection();
+            initDragProtection();
+            initDOMProtection();
+            initWindowProtection();
+            initNetworkProtection();
+
+            // Limpiar consola periódicamente
+            setInterval(() => {
+                console.clear();
+            }, 1000);
+
+            // Protección final (con manejo de errores)
+            try {
+                Object.freeze(window);
+                Object.freeze(document);
+            } catch (e) {
+                // Algunos navegadores no permiten congelar estos objetos
+                console.log('Protección de congelado no disponible');
+            }
+
+            // Activar monitoreo continuo
+            setInterval(function() {
+                // Verificar si las protecciones siguen activas
+                if (!isProtectionActive) {
+                    initAllProtections();
+                }
+                
+                // Verificar integridad de elementos críticos
+                if (!protectionOverlay || !captureBlocker || !protectedImage) {
+                    location.reload(); // Recargar si algo fue manipulado
+                }
+            }, 1000);
+        }
+
+        // Función pública para cargar imagen (usar desde código externo)
+        window.loadProtectedImage = function(imageSrc) {
+            loadImage(imageSrc);
+        };
+
+        // Auto-cargar imagen al cargar la página
+        document.addEventListener('DOMContentLoaded', function() {
+            // Cargar imagen específica caso.jpeg
+            loadImage('caso.jpeg');
+
+            // También permitir parámetro URL como alternativa
+            const urlParams = new URLSearchParams(window.location.search);
+            const imageUrl = urlParams.get('img');
+            
+            if (imageUrl) {
+                loadImage(decodeURIComponent(imageUrl));
+            }
+
+            // Activar protección básica
+            initAllProtections();
+        });
+
+        // Protección contra modificación de variables
+        Object.defineProperty(window, 'isProtectionActive', {
+            writable: false,
+            configurable: false
+        });
+    </script>
+</body>
+</html>
