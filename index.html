@@ -134,6 +134,12 @@
         let isImageHiddenByTouch = false;
         let suspiciousActivityCount = 0;
         
+        // Variables para dispositivos móviles
+        let isMobileDevice = false;
+        let mobileScreenshotAttempts = 0;
+        let lastTouchTime = 0;
+        let touchSequenceCount = 0;
+        
         // Función para activar capa negra (simula captura negra)
         function activateBlackLayer(duration = 500) {
             if (isBlackLayerActive) return;
@@ -174,6 +180,19 @@
                     protectionOverlay.style.opacity = '0';
                 }
             }
+        }
+
+        // Función para detectar dispositivos móviles
+        function detectMobileDevice() {
+            const userAgent = navigator.userAgent.toLowerCase();
+            const mobileKeywords = ['android', 'iphone', 'ipad', 'ipod', 'blackberry', 'windows phone', 'mobile', 'tablet'];
+            
+            isMobileDevice = mobileKeywords.some(keyword => userAgent.includes(keyword)) ||
+                           /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
+                           ('ontouchstart' in window) ||
+                           (navigator.maxTouchPoints > 0);
+            
+            return isMobileDevice;
         }
 
         // Detección avanzada de capturas de pantalla
@@ -594,7 +613,109 @@
             };
         }
 
+        // Protecciones específicas para dispositivos móviles
+        function initMobileScreenshotProtection() {
+            if (!isMobileDevice) return;
 
+            // Detectar combinaciones de teclas comunes para capturas en móviles
+            document.addEventListener('keydown', function(e) {
+                // Android: Power + Volume Down
+                // iOS: Power + Home, Power + Volume Up
+                if ((e.key === 'Power' || e.code === 'Power') ||
+                    (e.key === 'VolumeDown' || e.code === 'VolumeDown') ||
+                    (e.key === 'VolumeUp' || e.code === 'VolumeUp') ||
+                    (e.key === 'Home' || e.code === 'Home')) {
+                    
+                    mobileScreenshotAttempts++;
+                    activateBlackLayer(3000); // 3 segundos de protección
+                    
+                    if (mobileScreenshotAttempts > 2) {
+                        activatePermanentProtection();
+                    }
+                }
+            });
+
+            // Detectar patrones de touch sospechosos (gestos de captura)
+            let touchStartTime = 0;
+            let touchCount = 0;
+            
+            document.addEventListener('touchstart', function(e) {
+                touchStartTime = Date.now();
+                touchCount = e.touches.length;
+                lastTouchTime = touchStartTime;
+                
+                // Detectar múltiples toques simultáneos (posible gesto de captura)
+                if (touchCount >= 3) {
+                    mobileScreenshotAttempts++;
+                    activateBlackLayer(2000);
+                    e.preventDefault();
+                }
+                
+                // Detectar secuencias rápidas de toques
+                if (touchStartTime - lastTouchTime < 100) {
+                    touchSequenceCount++;
+                    if (touchSequenceCount > 5) {
+                        activateBlackLayer(1500);
+                        touchSequenceCount = 0;
+                    }
+                }
+            });
+
+            // Detectar gestos de captura por duración de touch
+            document.addEventListener('touchend', function(e) {
+                const touchDuration = Date.now() - touchStartTime;
+                
+                // Toques muy largos pueden ser intentos de captura
+                if (touchDuration > 2000) {
+                    mobileScreenshotAttempts++;
+                    activateBlackLayer(2000);
+                }
+            });
+
+            // Detectar cambios de orientación (común durante capturas)
+            window.addEventListener('orientationchange', function() {
+                activateBlackLayer(1000);
+                setTimeout(function() {
+                    // Reactivar protecciones después del cambio de orientación
+                    initAllProtections();
+                }, 500);
+            });
+
+            // Detectar eventos de visibilidad específicos de móviles
+            document.addEventListener('visibilitychange', function() {
+                if (document.hidden) {
+                    mobileScreenshotAttempts++;
+                    activateBlackLayer(3000);
+                    
+                    if (mobileScreenshotAttempts > 3) {
+                        activatePermanentProtection();
+                    }
+                }
+            });
+
+            // Detectar cambios en el estado de la aplicación (móviles)
+            window.addEventListener('pagehide', function() {
+                activateBlackLayer(2000);
+            });
+
+            window.addEventListener('pageshow', function() {
+                setTimeout(initAllProtections, 100);
+            });
+
+            // Protección contra herramientas de accesibilidad que pueden capturar
+            if ('speechSynthesis' in window) {
+                window.speechSynthesis.cancel();
+            }
+
+            // Detectar cambios en el zoom (común en capturas móviles)
+            let lastZoom = window.devicePixelRatio;
+            setInterval(function() {
+                if (window.devicePixelRatio !== lastZoom) {
+                    activateBlackLayer(1000);
+                    lastZoom = window.devicePixelRatio;
+                }
+            }, 500);
+        }
 
         // Detección mejorada de herramientas de automatización
         function initAutomationDetection() {
@@ -810,6 +931,9 @@
 
         // Inicializar todas las protecciones
         function initAllProtections() {
+            // Detectar dispositivo móvil primero
+            detectMobileDevice();
+            
             initScreenshotProtection();
             initAdvancedCaptureDetection();
             initVisibilityProtection();
@@ -822,6 +946,7 @@
             initNetworkProtection();
             initExtensionDetection();
             initScreenCaptureAPIProtection();
+            initMobileScreenshotProtection();
             initAutomationDetection();
             initCanvasProtection();
             initAntiOCRProtection();
