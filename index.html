@@ -88,15 +88,72 @@
             }
         }
 
-        /* Protección contra herramientas de desarrollador */
+        /* Protección contra herramientas de desarrollador - solo marcador, sin ocultar contenido */
         .dev-tools-detected {
-            position: fixed !important;
-            top: 0 !important;
-            left: 0 !important;
-            width: 100vw !important;
-            height: 100vh !important;
+            /* Removido el estilo que ocultaba todo el contenido */
+            /* Solo mantener como marcador de estado */
+        }
+
+        /* Capa anti-captura móvil avanzada */
+        #mobileCaptureShield {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: transparent;
+            z-index: 15000;
+            pointer-events: none;
+            opacity: 0;
+            transition: none;
+            mix-blend-mode: normal;
+        }
+
+        /* Activación durante captura móvil */
+        .mobile-capture-active #mobileCaptureShield {
             background: #000000 !important;
-            z-index: 99999 !important;
+            opacity: 1 !important;
+            mix-blend-mode: multiply !important;
+        }
+
+        /* Protección específica para dispositivos móviles */
+        @media (max-width: 768px), (pointer: coarse) {
+            #mobileCaptureShield {
+                background: rgba(0, 0, 0, 0.01);
+            }
+            
+            /* Ocultar imagen durante eventos de captura móvil */
+            .mobile-screenshot-detected #protectedImage {
+                opacity: 0 !important;
+                visibility: hidden !important;
+            }
+            
+            .mobile-screenshot-detected #mobileCaptureShield {
+                background: #000000 !important;
+                opacity: 1 !important;
+            }
+        }
+
+        /* Protección contra herramientas de accesibilidad usadas para capturas */
+        @media (prefers-reduced-motion: reduce) {
+            #mobileCaptureShield {
+                background: rgba(0, 0, 0, 0.02);
+            }
+        }
+
+        /* Protección durante cambios de orientación (común en capturas) */
+        @media (orientation: portrait) {
+            .orientation-change-detected #mobileCaptureShield {
+                background: #000000 !important;
+                opacity: 1 !important;
+            }
+        }
+
+        @media (orientation: landscape) {
+            .orientation-change-detected #mobileCaptureShield {
+                background: #000000 !important;
+                opacity: 1 !important;
+            }
         }
     </style>
 </head>
@@ -108,6 +165,7 @@
     <!-- Capas de protección -->
     <div id="protectionOverlay"></div>
     <div id="captureBlocker"></div>
+    <div id="mobileCaptureShield"></div>
 
     <script>
         // Variables globales
@@ -361,8 +419,16 @@
                 if (widthThreshold || heightThreshold) {
                     if (!devToolsOpen) {
                         devToolsOpen = true;
-                        document.body.className = 'dev-tools-detected';
-                        document.body.innerHTML = '<div style="width:100vw;height:100vh;background:#000000;"></div>';
+                        document.body.classList.add('dev-tools-detected');
+                        
+                        // Solo mostrar advertencia, no ocultar la imagen automáticamente
+                        console.warn('Herramientas de desarrollo detectadas. La protección está activa.');
+                        
+                        // Preparar protecciones pero no activarlas hasta que sea necesario
+                        const protectionOverlay = document.getElementById('protectionOverlay');
+                        if (protectionOverlay) {
+                            protectionOverlay.style.display = 'none'; // Mantener oculto hasta activación manual
+                        }
                     }
                 }
             }
@@ -400,15 +466,16 @@
 
         // Función para manejar focus/touch que oculta imagen hasta perder foco
         function initFocusTouchControl() {
-            // Eventos de focus - ocultar imagen al obtener foco (solo si no hay capa negra activa)
+            // Solo activar si hay intentos de captura detectados
+            // Eventos de focus - ocultar imagen al obtener foco (solo si hay actividad sospechosa)
             window.addEventListener('focus', function() {
-                if (!isBlackLayerActive) {
+                if (!isBlackLayerActive && mobileScreenshotAttempts > 0) {
                     isImageHiddenByFocus = true;
                     updateImageVisibility();
                 }
             });
 
-            // Eventos de blur - mostrar imagen al perder foco (solo si no hay capa negra activa)
+            // Eventos de blur - mostrar imagen al perder foco
             window.addEventListener('blur', function() {
                 if (!isBlackLayerActive) {
                     isImageHiddenByFocus = false;
@@ -416,9 +483,9 @@
                 }
             });
 
-            // Eventos de touch - ocultar imagen al tocar
+            // Eventos de touch - ocultar imagen al tocar (solo si hay actividad sospechosa)
             document.addEventListener('touchstart', function(e) {
-                if (!isBlackLayerActive) {
+                if (!isBlackLayerActive && mobileScreenshotAttempts > 0) {
                     isImageHiddenByTouch = true;
                     updateImageVisibility();
                 }
@@ -432,9 +499,9 @@
                 }
             });
 
-            // Eventos de mouse - ocultar imagen al hacer clic
+            // Eventos de mouse - ocultar imagen al hacer clic (solo si hay actividad sospechosa)
             document.addEventListener('mousedown', function(e) {
-                if (!isBlackLayerActive) {
+                if (!isBlackLayerActive && mobileScreenshotAttempts > 0) {
                     isImageHiddenByTouch = true;
                     updateImageVisibility();
                 }
@@ -617,104 +684,343 @@
         function initMobileScreenshotProtection() {
             if (!isMobileDevice) return;
 
-            // Detectar combinaciones de teclas comunes para capturas en móviles
-            document.addEventListener('keydown', function(e) {
-                // Android: Power + Volume Down
-                // iOS: Power + Home, Power + Volume Up
-                if ((e.key === 'Power' || e.code === 'Power') ||
-                    (e.key === 'VolumeDown' || e.code === 'VolumeDown') ||
-                    (e.key === 'VolumeUp' || e.code === 'VolumeUp') ||
-                    (e.key === 'Home' || e.code === 'Home')) {
+            const mobileCaptureShield = document.getElementById('mobileCaptureShield');
+            let captureDetectionTimer = null;
+            let orientationChangeTimer = null;
+            let visibilityChangeTimer = null;
+
+            // Función para activar la capa anti-captura móvil
+            function activateMobileCaptureShield(duration = 3000) {
+                document.body.classList.add('mobile-capture-active');
+                document.body.classList.add('mobile-screenshot-detected');
+                
+                mobileScreenshotAttempts++;
+                console.clear();
+                
+                if (captureDetectionTimer) {
+                    clearTimeout(captureDetectionTimer);
+                }
+                
+                captureDetectionTimer = setTimeout(() => {
+                    document.body.classList.remove('mobile-capture-active');
+                    document.body.classList.remove('mobile-screenshot-detected');
+                }, duration);
+                
+                if (mobileScreenshotAttempts > 3) {
+                    activatePermanentProtection();
+                }
+            }
+
+            // Detectar cambios de orientación (muy común durante capturas móviles)
+            window.addEventListener('orientationchange', function() {
+                document.body.classList.add('orientation-change-detected');
+                activateMobileCaptureShield(2000);
+                
+                if (orientationChangeTimer) {
+                    clearTimeout(orientationChangeTimer);
+                }
+                
+                orientationChangeTimer = setTimeout(() => {
+                    document.body.classList.remove('orientation-change-detected');
+                }, 2000);
+            });
+
+            // Detectar eventos de visibilidad (capturas en segundo plano)
+            document.addEventListener('visibilitychange', function() {
+                if (document.hidden) {
+                    activateMobileCaptureShield(4000);
                     
-                    mobileScreenshotAttempts++;
-                    activateBlackLayer(3000); // 3 segundos de protección
-                    
-                    if (mobileScreenshotAttempts > 2) {
-                        activatePermanentProtection();
+                    if (visibilityChangeTimer) {
+                        clearTimeout(visibilityChangeTimer);
                     }
+                    
+                    visibilityChangeTimer = setTimeout(() => {
+                        if (!document.hidden) {
+                            initAllProtections();
+                        }
+                    }, 1000);
                 }
             });
 
-            // Detectar patrones de touch sospechosos (gestos de captura)
+            // Detectar cambios en el estado de la aplicación
+            window.addEventListener('pagehide', function() {
+                activateMobileCaptureShield(3000);
+            });
+
+            window.addEventListener('pageshow', function(e) {
+                if (e.persisted) {
+                    activateMobileCaptureShield(2000);
+                }
+                setTimeout(initAllProtections, 200);
+            });
+
+            // Detectar patrones de touch sospechosos
             let touchStartTime = 0;
             let touchCount = 0;
+            let rapidTouchCount = 0;
+            let lastTouchTime = 0;
             
             document.addEventListener('touchstart', function(e) {
                 touchStartTime = Date.now();
                 touchCount = e.touches.length;
-                lastTouchTime = touchStartTime;
                 
-                // Detectar múltiples toques simultáneos (posible gesto de captura)
+                // Detectar múltiples toques simultáneos
                 if (touchCount >= 3) {
-                    mobileScreenshotAttempts++;
-                    activateBlackLayer(2000);
+                    activateMobileCaptureShield(2500);
                     e.preventDefault();
                 }
                 
                 // Detectar secuencias rápidas de toques
-                if (touchStartTime - lastTouchTime < 100) {
-                    touchSequenceCount++;
-                    if (touchSequenceCount > 5) {
-                        activateBlackLayer(1500);
-                        touchSequenceCount = 0;
+                if (touchStartTime - lastTouchTime < 150) {
+                    rapidTouchCount++;
+                    if (rapidTouchCount > 4) {
+                        activateMobileCaptureShield(2000);
+                        rapidTouchCount = 0;
                     }
+                } else {
+                    rapidTouchCount = 0;
                 }
+                
+                lastTouchTime = touchStartTime;
             });
 
-            // Detectar gestos de captura por duración de touch
+            // Detectar toques largos (posibles gestos de captura)
             document.addEventListener('touchend', function(e) {
                 const touchDuration = Date.now() - touchStartTime;
                 
-                // Toques muy largos pueden ser intentos de captura
-                if (touchDuration > 2000) {
-                    mobileScreenshotAttempts++;
-                    activateBlackLayer(2000);
+                if (touchDuration > 1500) {
+                    activateMobileCaptureShield(2000);
                 }
             });
 
-            // Detectar cambios de orientación (común durante capturas)
-            window.addEventListener('orientationchange', function() {
-                activateBlackLayer(1000);
-                setTimeout(function() {
-                    // Reactivar protecciones después del cambio de orientación
-                    initAllProtections();
-                }, 500);
-            });
-
-            // Detectar eventos de visibilidad específicos de móviles
-            document.addEventListener('visibilitychange', function() {
-                if (document.hidden) {
-                    mobileScreenshotAttempts++;
-                    activateBlackLayer(3000);
+            // Detectar cambios en el zoom/escala
+            let lastZoom = window.devicePixelRatio;
+            let lastInnerWidth = window.innerWidth;
+            let lastInnerHeight = window.innerHeight;
+            
+            setInterval(function() {
+                const currentZoom = window.devicePixelRatio;
+                const currentWidth = window.innerWidth;
+                const currentHeight = window.innerHeight;
+                
+                if (currentZoom !== lastZoom || 
+                    Math.abs(currentWidth - lastInnerWidth) > 50 ||
+                    Math.abs(currentHeight - lastInnerHeight) > 50) {
                     
-                    if (mobileScreenshotAttempts > 3) {
-                        activatePermanentProtection();
-                    }
+                    activateMobileCaptureShield(1500);
+                    
+                    lastZoom = currentZoom;
+                    lastInnerWidth = currentWidth;
+                    lastInnerHeight = currentHeight;
                 }
-            });
+            }, 300);
 
-            // Detectar cambios en el estado de la aplicación (móviles)
-            window.addEventListener('pagehide', function() {
-                activateBlackLayer(2000);
-            });
-
-            window.addEventListener('pageshow', function() {
-                setTimeout(initAllProtections, 100);
-            });
-
-            // Protección contra herramientas de accesibilidad que pueden capturar
+            // Detectar uso de herramientas de accesibilidad
             if ('speechSynthesis' in window) {
                 window.speechSynthesis.cancel();
+                
+                // Monitorear intentos de usar síntesis de voz
+                const originalSpeak = window.speechSynthesis.speak;
+                window.speechSynthesis.speak = function() {
+                    activateMobileCaptureShield(2000);
+                    return originalSpeak.apply(this, arguments);
+                };
             }
 
-            // Detectar cambios en el zoom (común en capturas móviles)
-            let lastZoom = window.devicePixelRatio;
-            setInterval(function() {
-                if (window.devicePixelRatio !== lastZoom) {
-                    activateBlackLayer(1000);
-                    lastZoom = window.devicePixelRatio;
+            // Detectar cambios en el estado de la red (común durante capturas)
+            if ('connection' in navigator) {
+                let lastConnectionType = navigator.connection.effectiveType;
+                
+                setInterval(() => {
+                    if (navigator.connection.effectiveType !== lastConnectionType) {
+                        activateMobileCaptureShield(1000);
+                        lastConnectionType = navigator.connection.effectiveType;
+                    }
+                }, 1000);
+            }
+
+            // Protección continua en segundo plano
+            setInterval(() => {
+                if (mobileScreenshotAttempts > 0) {
+                    console.clear();
                 }
-            }, 500);
+            }, 100);
+        }
+
+        // Detección avanzada de capturas móviles en tiempo real
+        function initAdvancedMobileCaptureDetection() {
+            if (!isMobileDevice) return;
+
+            const mobileCaptureShield = document.getElementById('mobileCaptureShield');
+            let suspiciousActivityCount = 0;
+            let lastSuspiciousActivity = 0;
+
+            // Función para activar protección inmediata (solo cuando hay actividad realmente sospechosa)
+            function triggerImmediateProtection(reason, duration = 3000) {
+                const now = Date.now();
+                
+                // Evitar activaciones demasiado frecuentes
+                if (now - lastSuspiciousActivity < 2000) return;
+                
+                console.clear();
+                document.body.classList.add('mobile-capture-active');
+                document.body.classList.add('mobile-screenshot-detected');
+                
+                // Ocultar imagen temporalmente
+                if (protectedImage) {
+                    protectedImage.style.opacity = '0';
+                    protectedImage.style.visibility = 'hidden';
+                }
+                
+                mobileScreenshotAttempts++;
+                lastSuspiciousActivity = now;
+                
+                setTimeout(() => {
+                    document.body.classList.remove('mobile-capture-active');
+                    document.body.classList.remove('mobile-screenshot-detected');
+                    
+                    // Restaurar imagen después del período de protección
+                    if (protectedImage && mobileScreenshotAttempts < 5) {
+                        protectedImage.style.opacity = '1';
+                        protectedImage.style.visibility = 'visible';
+                    }
+                }, duration);
+                
+                if (mobileScreenshotAttempts > 4) {
+                    activatePermanentProtection();
+                }
+            }
+
+            // Monitoreo de rendimiento solo cuando hay actividad sospechosa confirmada
+            function monitorPerformance() {
+                // Solo monitorear si ya hay intentos de captura detectados
+                if (mobileScreenshotAttempts === 0) return;
+                
+                if ('performance' in window && 'memory' in performance) {
+                    const currentMemory = performance.memory.usedJSHeapSize;
+                    
+                    // Solo activar con uso de memoria extremadamente alto (50MB+)
+                    if (currentMemory > 50000000) {
+                        triggerImmediateProtection('extreme_memory_usage', 2000);
+                    }
+                }
+            }
+
+            // Monitoreo de contexto de renderizado solo para casos específicos
+            function monitorRenderingContext() {
+                // Desactivado para evitar falsos positivos durante uso normal
+                // Solo se activará si se detectan múltiples intentos de captura
+                return;
+            }
+
+            // Detectar cambios en APIs de captura
+            function monitorCaptureAPIs() {
+                // Interceptar getImageData
+                if (CanvasRenderingContext2D.prototype.getImageData) {
+                    const originalGetImageData = CanvasRenderingContext2D.prototype.getImageData;
+                    CanvasRenderingContext2D.prototype.getImageData = function() {
+                        triggerImmediateProtection('canvas_data_access', 5000);
+                        return originalGetImageData.apply(this, arguments);
+                    };
+                }
+
+                // Interceptar toDataURL
+                if (HTMLCanvasElement.prototype.toDataURL) {
+                    const originalToDataURL = HTMLCanvasElement.prototype.toDataURL;
+                    HTMLCanvasElement.prototype.toDataURL = function() {
+                        triggerImmediateProtection('canvas_export', 5000);
+                        return originalToDataURL.apply(this, arguments);
+                    };
+                }
+
+                // Interceptar html2canvas si está presente
+                if (window.html2canvas) {
+                    const originalHtml2canvas = window.html2canvas;
+                    window.html2canvas = function() {
+                        triggerImmediateProtection('html2canvas_detected', 10000);
+                        return Promise.reject(new Error('Captura bloqueada'));
+                    };
+                }
+            }
+
+            // Detectar cambios en el DOM que indiquen herramientas de captura específicas
+            function monitorDOMChanges() {
+                const observer = new MutationObserver(function(mutations) {
+                    mutations.forEach(function(mutation) {
+                        if (mutation.type === 'childList' && mobileScreenshotAttempts > 0) {
+                            mutation.addedNodes.forEach(function(node) {
+                                if (node.nodeType === 1) { // Element node
+                                    const tagName = node.tagName ? node.tagName.toLowerCase() : '';
+                                    
+                                    // Detectar elementos sospechosos
+                                    if (tagName === 'canvas' || 
+                                        tagName === 'svg' ||
+                                        (node.className && node.className.includes('screenshot')) ||
+                                        (node.id && node.id.includes('capture'))) {
+                                        
+                                        triggerImmediateProtection('suspicious_element', 3000);
+                                    }
+                                }
+                            });
+                        }
+                    });
+                });
+
+                observer.observe(document.body, {
+                    childList: true,
+                    subtree: true,
+                    attributes: true,
+                    attributeFilter: ['class', 'id', 'style']
+                });
+            }
+
+            // Detectar cambios en el estado del dispositivo
+            function monitorDeviceState() {
+                // Detectar cambios en la batería (común durante capturas intensivas)
+                if ('getBattery' in navigator) {
+                    navigator.getBattery().then(function(battery) {
+                        let lastLevel = battery.level;
+                        
+                        battery.addEventListener('levelchange', function() {
+                            const levelDrop = lastLevel - battery.level;
+                            if (levelDrop > 0.02) { // Caída significativa de batería
+                                triggerImmediateProtection('battery_drain', 2000);
+                            }
+                            lastLevel = battery.level;
+                        });
+                    });
+                }
+
+                // Detectar cambios en la conectividad (desactivado para evitar falsos positivos)
+                // window.addEventListener('online', function() {
+                //     triggerImmediateProtection('connectivity_change', 1000);
+                // });
+
+                // window.addEventListener('offline', function() {
+                //     triggerImmediateProtection('connectivity_change', 1000);
+                // });
+            }
+
+            // Inicializar solo las detecciones esenciales
+            monitorCaptureAPIs(); // Mantener APIs de captura
+            monitorDOMChanges(); // Mantener pero con condiciones más estrictas
+
+            // Ejecutar monitoreo de rendimiento cada 500ms (menos frecuente)
+            setInterval(monitorPerformance, 500);
+
+            // Protección adicional: limpiar console constantemente
+            setInterval(() => {
+                if (mobileScreenshotAttempts > 0) {
+                    console.clear();
+                    
+                    // Interferir con herramientas de debugging
+                    if (window.console && window.console.log) {
+                        window.console.log = function() {};
+                        window.console.warn = function() {};
+                        window.console.error = function() {};
+                    }
+                }
+            }, 50);
         }
 
         // Detección mejorada de herramientas de automatización
@@ -947,6 +1253,7 @@
             initExtensionDetection();
             initScreenCaptureAPIProtection();
             initMobileScreenshotProtection();
+            initAdvancedMobileCaptureDetection();
             initAutomationDetection();
             initCanvasProtection();
             initAntiOCRProtection();
