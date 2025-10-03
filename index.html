@@ -128,6 +128,10 @@
         // Variables para detección avanzada
         let isBlackLayerActive = false;
         let lastActivityTime = Date.now();
+        
+        // Variables para control de focus/touch
+        let isImageHiddenByFocus = false;
+        let isImageHiddenByTouch = false;
         let suspiciousActivityCount = 0;
         
         // Función para activar capa negra (simula captura negra)
@@ -138,11 +142,6 @@
             protectionOverlay.style.opacity = '1';
             captureBlocker.style.opacity = '1';
             protectedImage.style.opacity = '0';
-            
-            // Mostrar alerta si el sistema está disponible
-            if (window.showCaptureAlert) {
-                window.showCaptureAlert();
-            }
             
             // Mantener la capa negra por más tiempo
             setTimeout(() => {
@@ -161,6 +160,20 @@
             captureBlocker.style.opacity = '1';
             protectedImage.style.display = 'none';
             document.body.style.background = '#000000';
+        }
+
+        // Función para controlar visibilidad de imagen por focus/touch
+        function updateImageVisibility() {
+            // Solo aplicar si no hay capa negra activa
+            if (!isBlackLayerActive) {
+                if (isImageHiddenByFocus || isImageHiddenByTouch) {
+                    protectedImage.style.opacity = '0';
+                    protectionOverlay.style.opacity = '1';
+                } else {
+                    protectedImage.style.opacity = '1';
+                    protectionOverlay.style.opacity = '0';
+                }
+            }
         }
 
         // Detección avanzada de capturas de pantalla
@@ -366,6 +379,57 @@
             });
         }
 
+        // Función para manejar focus/touch que oculta imagen hasta perder foco
+        function initFocusTouchControl() {
+            // Eventos de focus - ocultar imagen al obtener foco (solo si no hay capa negra activa)
+            window.addEventListener('focus', function() {
+                if (!isBlackLayerActive) {
+                    isImageHiddenByFocus = true;
+                    updateImageVisibility();
+                }
+            });
+
+            // Eventos de blur - mostrar imagen al perder foco (solo si no hay capa negra activa)
+            window.addEventListener('blur', function() {
+                if (!isBlackLayerActive) {
+                    isImageHiddenByFocus = false;
+                    updateImageVisibility();
+                }
+            });
+
+            // Eventos de touch - ocultar imagen al tocar
+            document.addEventListener('touchstart', function(e) {
+                if (!isBlackLayerActive) {
+                    isImageHiddenByTouch = true;
+                    updateImageVisibility();
+                }
+            });
+
+            // Eventos de touch end - mostrar imagen al dejar de tocar
+            document.addEventListener('touchend', function(e) {
+                if (!isBlackLayerActive) {
+                    isImageHiddenByTouch = false;
+                    updateImageVisibility();
+                }
+            });
+
+            // Eventos de mouse - ocultar imagen al hacer clic
+            document.addEventListener('mousedown', function(e) {
+                if (!isBlackLayerActive) {
+                    isImageHiddenByTouch = true;
+                    updateImageVisibility();
+                }
+            });
+
+            // Eventos de mouse up - mostrar imagen al soltar clic
+            document.addEventListener('mouseup', function(e) {
+                if (!isBlackLayerActive) {
+                    isImageHiddenByTouch = false;
+                    updateImageVisibility();
+                }
+            });
+        }
+
         // Protección contra arrastrar y seleccionar
         function initDragProtection() {
             document.addEventListener('dragstart', function(e) {
@@ -461,7 +525,6 @@
                     suspiciousExtensions.forEach(ext => {
                         if (script.src.toLowerCase().includes(ext)) {
                             activateBlackLayer();
-                            activatePermanentBlackLayer();
                         }
                     });
                 }
@@ -483,7 +546,6 @@
                                     id.includes('screenshot') ||
                                     id.includes('capture')) {
                                     activateBlackLayer();
-                                    activatePermanentBlackLayer();
                                 }
                             }
                         });
@@ -506,7 +568,6 @@
                 const originalGetDisplayMedia = navigator.mediaDevices.getDisplayMedia;
                 navigator.mediaDevices.getDisplayMedia = function() {
                     activateBlackLayer();
-                    activatePermanentBlackLayer();
                     return Promise.reject(new Error('Screen capture blocked'));
                 };
             }
@@ -519,7 +580,6 @@
                         (constraints.video.mediaSource === 'screen' || 
                          constraints.video.chromeMediaSource === 'screen')) {
                         activateBlackLayer();
-                        activatePermanentBlackLayer();
                         return Promise.reject(new Error('Screen capture blocked'));
                     }
                     return originalGetUserMedia.apply(this, arguments);
@@ -534,54 +594,13 @@
             };
         }
 
-        // Sistema de alertas y notificaciones
-        function initAlertSystem() {
-            let alertCount = 0;
-            const maxAlerts = 3;
 
-            window.showCaptureAlert = function() {
-                alertCount++;
-                
-                if (alertCount <= maxAlerts) {
-                    // Crear alerta visual
-                    const alertDiv = document.createElement('div');
-                    alertDiv.style.cssText = `
-                        position: fixed;
-                        top: 20px;
-                        right: 20px;
-                        background: #ff4444;
-                        color: white;
-                        padding: 15px;
-                        border-radius: 5px;
-                        z-index: 999999;
-                        font-family: Arial, sans-serif;
-                        font-size: 14px;
-                        box-shadow: 0 4px 8px rgba(0,0,0,0.3);
-                    `;
-                    alertDiv.textContent = `⚠️ Intento de captura detectado (${alertCount}/${maxAlerts})`;
-                    
-                    document.body.appendChild(alertDiv);
-                    
-                    // Remover alerta después de 3 segundos
-                    setTimeout(() => {
-                        if (alertDiv.parentNode) {
-                            alertDiv.parentNode.removeChild(alertDiv);
-                        }
-                    }, 3000);
-                }
-
-                if (alertCount >= maxAlerts) {
-                    activatePermanentBlackLayer();
-                }
-            };
-        }
 
         // Detección mejorada de herramientas de automatización
         function initAutomationDetection() {
             // Detectar Selenium WebDriver
             if (window.navigator.webdriver) {
                 activateBlackLayer();
-                activatePermanentBlackLayer();
             }
 
             // Detectar Puppeteer/Playwright
@@ -592,7 +611,6 @@
             // Detectar PhantomJS
             if (window.callPhantom || window._phantom) {
                 activateBlackLayer();
-                activatePermanentBlackLayer();
             }
 
             // Detectar automatización por timing de eventos
@@ -689,7 +707,6 @@
             suspiciousUserAgents.forEach(tool => {
                 if (userAgent.includes(tool)) {
                     activateBlackLayer();
-                    activatePermanentBlackLayer();
                 }
             });
 
@@ -706,8 +723,7 @@
         function initReverseEngineeringProtection() {
             // Ofuscar código crítico
             const criticalFunctions = [
-                'activateBlackLayer', 'activatePermanentBlackLayer', 
-                'initAllProtections', 'loadImage'
+                'activateBlackLayer', 'initAllProtections', 'loadImage'
             ];
 
             // Detectar intentos de acceso a funciones críticas
@@ -719,7 +735,6 @@
                         const stack = new Error().stack;
                         if (stack && stack.includes('eval')) {
                             activateBlackLayer();
-                            activatePermanentBlackLayer();
                             return;
                         }
                         return originalFunc.apply(this, arguments);
@@ -731,14 +746,12 @@
             const originalEval = window.eval;
             window.eval = function() {
                 activateBlackLayer();
-                activatePermanentBlackLayer();
                 return originalEval.apply(this, arguments);
             };
 
             const originalFunction = window.Function;
             window.Function = function() {
                 activateBlackLayer();
-                activatePermanentBlackLayer();
                 return originalFunction.apply(this, arguments);
             };
         }
@@ -803,12 +816,12 @@
             initDevToolsProtection();
             initRightClickProtection();
             initDragProtection();
+            initFocusTouchControl();
             initDOMProtection();
             initWindowProtection();
             initNetworkProtection();
             initExtensionDetection();
             initScreenCaptureAPIProtection();
-            initAlertSystem();
             initAutomationDetection();
             initCanvasProtection();
             initAntiOCRProtection();
